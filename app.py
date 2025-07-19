@@ -3,13 +3,17 @@ import google.generativeai as genai
 from PIL import Image
 import io
 import os
-from dotenv import load_dotenv
 import time
 from typing import List, Optional, Tuple, Dict, Any
 import base64
 
-# Load environment variables
-load_dotenv()
+# Load environment variables for backward compatibility (optional)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv not installed, which is fine for UI-based API key input
+    pass
 
 # Configure Streamlit page
 st.set_page_config(
@@ -20,12 +24,12 @@ st.set_page_config(
 )
 
 class ChatExtractor:
-    def __init__(self):
+    def __init__(self, api_key: str):
         """Initialize the ChatExtractor with Gemini API configuration."""
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        if not self.api_key:
-            st.error("⚠️ GEMINI_API_KEY not found in environment variables!")
-            st.stop()
+        self.api_key = api_key
+        
+        if not self.api_key or self.api_key.strip() == "":
+            raise ValueError("API key cannot be empty")
         
         # Configure Gemini
         genai.configure(api_key=self.api_key)
@@ -34,8 +38,7 @@ class ChatExtractor:
         try:
             self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
         except Exception as e:
-            st.error(f"❌ Failed to initialize Gemini model: {str(e)}")
-            st.stop()
+            raise Exception(f"Failed to initialize Gemini model: {str(e)}")
     
     def prepare_images(self, uploaded_files: List) -> Tuple[List[Image.Image], List[Dict[str, Any]]]:
         """
@@ -187,44 +190,102 @@ def main():
     
     # Sidebar configuration
     with st.sidebar:
-        st.header("⚙️ Configuration")
+        st.header("🔑 API Configuration")
         
-        # API Key status
-        api_key = os.getenv("GEMINI_API_KEY")
-        if api_key:
-            st.success("✅ Gemini API Key loaded")
-            # Show only first 10 characters for security
-            key_preview = api_key[:10] + "..." if len(api_key) > 10 else api_key
-            st.text(f"Key: {key_preview}")
+        # API Key input
+        api_key_input = st.text_input(
+            "Enter your Gemini API Key:",
+            type="password",
+            placeholder="Enter your API key here...",
+            help="Get your free API key from Google AI Studio: https://makersuite.google.com/app/apikey"
+        )
+        
+        # API Key status and validation
+        if api_key_input:
+            # Validate API key format (basic validation)
+            if len(api_key_input.strip()) < 20:
+                st.warning("⚠️ API key seems too short. Please check your key.")
+                api_key_valid = False
+            else:
+                st.success("✅ API Key entered")
+                # Show only first 10 characters for security
+                key_preview = api_key_input[:10] + "..." if len(api_key_input) > 10 else api_key_input
+                st.text(f"Key: {key_preview}")
+                api_key_valid = True
         else:
-            st.error("❌ Gemini API Key missing")
-            st.markdown("Add your API key to `.env` file:")
-            st.code("GEMINI_API_KEY=your_api_key_here")
-            return
+            st.info("🔐 Please enter your Gemini API key to get started")
+            st.markdown("### How to get API Key:")
+            st.markdown("""
+            1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
+            2. Sign in with your Google account
+            3. Click **"Create API Key"**
+            4. Copy and paste it above
+            """)
+            api_key_valid = False
         
-        st.markdown("---")
-        st.markdown("### 📋 Instructions")
+        # Only show the rest of the sidebar if API key is provided
+        if api_key_valid:
+            st.markdown("---")
+            st.markdown("### 📋 Instructions")
+            st.markdown("""
+            1. **Upload screenshots** in chronological order
+            2. Supported formats: PNG, JPG, JPEG
+            3. Images will be sorted by filename
+            4. Click **Extract Conversation** to process
+            5. **Download** or **copy** the result
+            """)
+            
+            st.markdown("---")
+            st.markdown("### 🔧 Settings")
+            
+            # Download format selection
+            download_format = st.selectbox(
+                "Download Format:",
+                ["txt", "md"],
+                index=0,
+                help="Choose the format for downloading extracted conversation"
+            )
+        else:
+            download_format = "txt"  # Default value
+    
+    # Early return if no valid API key
+    if not api_key_input or not api_key_valid:
+        st.info("👆 Please enter your Gemini API key in the sidebar to get started!")
+        
+        # Show helpful information
+        st.header("🤖 About This App")
         st.markdown("""
-        1. **Upload screenshots** in chronological order
-        2. Supported formats: PNG, JPG, JPEG
-        3. Images will be sorted by filename
-        4. Click **Extract Conversation** to process
-        5. **Download** or **copy** the result
+        This app uses Google's **Gemini 2.0 Flash API** to intelligently extract structured conversations 
+        from chat screenshots. It can process multiple images and create clean, readable conversation text.
+        
+        **Features:**
+        - 📸 Process multiple screenshots in order
+        - 🤖 AI-powered text extraction
+        - 🌍 Multi-language support (Hindi, English, etc.)
+        - 📝 Clean formatting with sender labels
+        - 💾 Download as TXT or Markdown
+        - 📋 One-click copy to clipboard
         """)
         
-        st.markdown("---")
-        st.markdown("### 🔧 Settings")
+        st.header("🔒 Privacy & Security")
+        st.markdown("""
+        - Your API key is only used for this session and never stored
+        - Images are processed through Google's secure API
+        - No data is saved on our servers
+        - All processing happens in real-time
+        """)
         
-        # Download format selection
-        download_format = st.selectbox(
-            "Download Format:",
-            ["txt", "md"],
-            index=0,
-            help="Choose the format for downloading extracted conversation"
-        )
+        return
     
-    # Initialize extractor
-    extractor = ChatExtractor()
+    # Initialize extractor with user's API key
+    try:
+        with st.spinner("🔄 Initializing Gemini API..."):
+            extractor = ChatExtractor(api_key_input.strip())
+        st.sidebar.success("🤖 Gemini API ready!")
+    except Exception as e:
+        st.sidebar.error(f"❌ API Error: {str(e)}")
+        st.error("Failed to initialize Gemini API. Please check your API key and try again.")
+        return
     
     # File upload section
     st.header("📸 Upload Chat Screenshots")
